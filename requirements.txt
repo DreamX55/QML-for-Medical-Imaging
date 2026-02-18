@@ -1,0 +1,39 @@
+# Hybrid Quantum-Classical ML for Medical Imaging
+# Python 3.9+ required
+
+# Core Deep Learning
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Quantum Computing
+pennylane>=0.33.0
+pennylane-lightning>=0.33.0
+
+# Classical ML
+xgboost>=2.0.0
+scikit-learn>=1.3.0
+
+# Explainable AI
+shap>=0.43.0
+lime>=0.2.0.1
+
+# Image Processing
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# Data & Computation
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.11.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Utilities
+tqdm>=4.65.0
+pyyaml>=6.0
+tensorboard>=2.14.0
+
+# Type hints and validation
+typing-extensions>=4.7.0
