@@ -121,29 +121,18 @@ class QuantumLayer(nn.Module):
             log_angle_statistics(x_normalized, label="rotation_angles")
             self._debug_counter += 1
         
-        # Execute quantum circuit with parameter broadcasting
-        # PennyLane supports broadcasting when using diff_method='backprop':
-        # passing [batch_size, n_qubits] inputs processes all samples in one
-        # vectorized call instead of a Python for-loop over the batch.
-        try:
-            result = self.pqc(x_normalized, weights_cpu)
-            if isinstance(result, (list, tuple)):
-                # result is list of tensors, each [batch_size] → stack to [n_outputs, batch_size]
-                output = torch.stack(result, dim=-1)  # [batch_size, n_outputs]
-                if output.dim() == 1:
-                    output = output.unsqueeze(0)
-            else:
-                output = result
-        except Exception:
-            # Fallback: sequential processing for backends without broadcasting
-            outputs = []
-            for i in range(batch_size):
-                sample = x_normalized[i]
-                result = self.pqc(sample, weights_cpu)
-                if isinstance(result, list):
-                    result = torch.stack(result)
-                outputs.append(result)
-            output = torch.stack(outputs, dim=0)
+        # Process each sample through the quantum circuit
+        # Note: lightning.qubit with adjoint diff doesn't support parameter
+        # broadcasting (silently returns wrong shapes), so we use sequential
+        # execution which works reliably across all PennyLane backends.
+        outputs = []
+        for i in range(batch_size):
+            sample = x_normalized[i]
+            result = self.pqc(sample, weights_cpu)
+            if isinstance(result, list):
+                result = torch.stack(result)
+            outputs.append(result)
+        output = torch.stack(outputs, dim=0)
         
         # Convert to float32 and move back to original device
         # (MPS doesn't support float64, PennyLane may return float64)
