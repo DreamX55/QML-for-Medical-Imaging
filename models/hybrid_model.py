@@ -67,6 +67,13 @@ class HybridQuantumClassifier(nn.Module):
         # CNN feature extractor
         self.cnn = get_feature_extractor(config.model, input_channels)
         
+        # Quantum Transfer Learning: Freeze backbone if requested
+        if hasattr(config.training, 'freeze_backbone') and config.training.freeze_backbone:
+            if hasattr(self.cnn, 'freeze'):
+                self.cnn.freeze()
+            else:
+                print("Warning: Backbone does not support freezing.")
+        
         # Quantum layer (optional)
         if use_quantum:
             self.quantum_layer = QuantumLayer(config.quantum)
@@ -95,12 +102,22 @@ class HybridQuantumClassifier(nn.Module):
         #
         # NOTE: No softmax here. CrossEntropyLoss expects raw logits.
         # Softmax is applied only in predict_proba() for inference.
+        # Classical post-processing (quantum branch)
         self.classifier = nn.Sequential(
             nn.Linear(classifier_input_dim, 32),
             nn.ReLU(inplace=True),
             nn.Dropout(config.model.dropout_rate),
             nn.Linear(32, self.num_classes),
-            # No softmax — CrossEntropyLoss handles it internally
+        )
+
+        # Classical-only head (ensemble branch)
+        # This branch bypasses the quantum layer and predicts directly from features.
+        # It provides a stable baseline that the quantum layer can enhance.
+        self.classical_head = nn.Sequential(
+            nn.Linear(config.model.num_features, 32),
+            nn.ReLU(inplace=True),
+            nn.Dropout(config.model.dropout_rate),
+            nn.Linear(32, self.num_classes),
         )
         
         # Store feature dimensions for XAI
@@ -110,42 +127,40 @@ class HybridQuantumClassifier(nn.Module):
         print(f"\nHybridQuantumClassifier initialized:")
         print(f"  CNN output dim: {self.cnn_feature_dim}")
         print(f"  Quantum enabled: {use_quantum}")
-        print(f"  Classifier input dim: {classifier_input_dim}")
-        print(f"  Num classes: {self.num_classes}")
+        print(f"  Ensemble enabled: True")
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass through the hybrid model.
-        
-        Pipeline: CNN → feature compression → quantum layer → classical dense → logits
+        Forward pass through the hybrid ensemble model.
         
         Args:
             x: Input image tensor [batch, channels, height, width]
             
         Returns:
-            Raw class logits [batch, num_classes] (unbounded, no softmax)
-            Feed these directly to CrossEntropyLoss for training.
+            Ensemble probabilities or logits
         """
-        # Step 1: CNN feature extraction + compression
-        # Output: [batch, num_features] (e.g., [batch, 10])
+        # Step 1: Classical backbone features
         cnn_features = self.cnn(x)
         
-        # Step 2: Quantum processing (if enabled)
+        # Step 2: Parallel Branches
+        
+        # Branch A: Classical (Baseline)
+        c_logits = self.classical_head(cnn_features)
+        
+        # Branch B: Quantum (Experimental)
         if self.use_quantum:
-            # Quantum layer: normalized features → PQC → expectation values
-            # Output: [batch, n_outputs] with values in [-1, 1] (Pauli-Z expectations)
-            # IMPORTANT: These are NOT logits — they must go through the classifier head
-            quantum_features = self.quantum_layer(cnn_features)
-            features = quantum_features
+            q_features = self.quantum_layer(cnn_features)
+            q_logits = self.classifier(q_features)
         else:
-            features = cnn_features
+            q_logits = c_logits
         
-        # Step 3: Classical post-processing → raw logits
-        # Maps quantum features (bounded [-1,1]) to unbounded logit space
-        # Output: [batch, num_classes] (e.g., [batch, 3])
-        logits = self.classifier(features)
+        # Step 3: Ensemble Combination
+        # We start with equal weighting. A learned weighting scalar could be added later.
+        # current state-of-the-art often uses simple averaging.
+        alpha = 0.5
+        ensemble_logits = alpha * c_logits + (1 - alpha) * q_logits
         
-        return logits
+        return ensemble_logits
     
     def predict(self, x: torch.Tensor) -> torch.Tensor:
         """

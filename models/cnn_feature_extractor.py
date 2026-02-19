@@ -225,90 +225,130 @@ class ResNetFeatureExtractor(nn.Module):
     """
     ResNet-based feature extractor using pretrained backbone.
     
-    Alternative to custom CNN when transfer learning is preferred.
-    Uses ResNet18 with final layer replaced by compression layer.
-    
-    Note: For research reproducibility, custom CNN is often preferred
-    as it provides full control over the architecture.
+    Uses ResNet18/34/50 with final layer replaced by compression layer.
     """
     
     def __init__(self, config: ModelConfig, pretrained: bool = True):
-        """
-        Initialize ResNet-based feature extractor.
-        
-        Args:
-            config: Model configuration
-            pretrained: Whether to use ImageNet pretrained weights
-        """
         super().__init__()
-        
         self.config = config
         self.output_dim = config.num_features
         
-        # Import torchvision for pretrained models
+        # Import torchvision
         from torchvision import models
         
-        # Load pretrained ResNet18
-        resnet = models.resnet18(pretrained=pretrained)
-        
-        # Remove the final FC layer
+        # Select backbone
+        backbone_name = config.backbone.lower() if config.backbone else 'resnet18'
+        if backbone_name == 'resnet18':
+            resnet = models.resnet18(pretrained=pretrained)
+            out_features = 512
+        elif backbone_name == 'resnet34':
+            resnet = models.resnet34(pretrained=pretrained)
+            out_features = 512
+        elif backbone_name == 'resnet50':
+            resnet = models.resnet50(pretrained=pretrained)
+            out_features = 2048
+        else:
+            # Fallback to defaults if unknown
+            print(f"Warning: Unknown backbone {backbone_name}, using ResNet18")
+            resnet = models.resnet18(pretrained=pretrained)
+            out_features = 512
+            
+        # Remove final FC layer
         self.backbone = nn.Sequential(*list(resnet.children())[:-1])
         
         # Compression layer
-        resnet_features = 512  # ResNet18 output features
         self.compression = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(resnet_features, 64),
+            nn.Linear(out_features, 64),
+            nn.ReLU(inplace=True),
+            nn.Dropout(config.dropout_rate),
+            nn.Linear(64, self.output_dim),
+            nn.BatchNorm1d(self.output_dim),  # Normalize to N(0,1) for quantum encoding
+        )
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        features = self.backbone(x)
+        compressed = self.compression(features)
+        return compressed
+        
+    def freeze(self) -> None:
+        """Freeze backbone weights (Quantum Transfer Learning)."""
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        print("❄️  ResNet backbone frozen")
+        
+    def unfreeze(self) -> None:
+        """Unfreeze backbone weights."""
+        for param in self.backbone.parameters():
+            param.requires_grad = True
+        print("🔥 ResNet backbone unfrozen")
+
+
+class EfficientNetFeatureExtractor(nn.Module):
+    """
+    EfficientNet-based feature extractor.
+    
+    Uses EfficientNet-B0/B1 etc.
+    """
+    
+    def __init__(self, config: ModelConfig, pretrained: bool = True):
+        super().__init__()
+        self.config = config
+        self.output_dim = config.num_features
+        
+        from torchvision import models
+        
+        # Map simple names to torchvision names
+        name_map = {
+            'efficientnet_b0': models.efficientnet_b0,
+            'efficientnet_b1': models.efficientnet_b1,
+            'efficientnet_b2': models.efficientnet_b2,
+        }
+        
+        backbone_name = config.backbone.lower()
+        model_fn = name_map.get(backbone_name, models.efficientnet_b0)
+        
+        weights = 'DEFAULT' if pretrained else None
+        efficientnet = model_fn(weights=weights)
+        
+        # Output features for B0 is 1280
+        out_features = efficientnet.classifier[1].in_features
+        
+        # Remove classifier
+        self.backbone = efficientnet.features
+        self.avgpool = efficientnet.avgpool
+        
+        # Compression
+        self.compression = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(out_features, 64),
             nn.ReLU(inplace=True),
             nn.Dropout(config.dropout_rate),
             nn.Linear(64, self.output_dim),
             nn.BatchNorm1d(self.output_dim),  # Normalize to N(0,1)
         )
         
-        # Freeze early layers if using pretrained
-        if pretrained:
-            self._freeze_early_layers()
-    
-    def _freeze_early_layers(self) -> None:
-        """Freeze early layers to preserve pretrained features."""
-        # Freeze first 6 layers (roughly half of ResNet18)
-        layers_to_freeze = list(self.backbone.children())[:6]
-        for layer in layers_to_freeze:
-            for param in layer.parameters():
-                param.requires_grad = False
-    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass through ResNet feature extractor."""
-        features = self.backbone(x)
-        compressed = self.compression(features)
-        return compressed
-    
-    def get_feature_maps(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Get feature maps and compressed features."""
-        # Get features before final pooling
-        for i, layer in enumerate(self.backbone.children()):
-            x = layer(x)
-            if i == len(list(self.backbone.children())) - 2:
-                feature_maps = x  # Save before final avg pool
+        x = self.backbone(x)
+        x = self.avgpool(x)
+        return self.compression(x)
         
-        compressed = self.compression(self.backbone[-1](feature_maps))
-        return feature_maps, compressed
+    def freeze(self) -> None:
+        """Freeze backbone weights."""
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        print("❄️  EfficientNet backbone frozen")
 
 
 def get_feature_extractor(config: ModelConfig, input_channels: int = 3) -> nn.Module:
-    """
-    Factory function to get the appropriate feature extractor.
-    
-    Args:
-        config: Model configuration
-        input_channels: Number of input channels
-        
-    Returns:
-        Feature extractor module
-    """
-    if config.backbone is None:
+    """Factory function."""
+    if not config.backbone or config.backbone.lower() == 'custom':
         return CNNFeatureExtractor(config, input_channels)
-    elif config.backbone.lower() == 'resnet18':
+    
+    name = config.backbone.lower()
+    if 'resnet' in name:
         return ResNetFeatureExtractor(config, pretrained=True)
+    elif 'efficientnet' in name:
+        return EfficientNetFeatureExtractor(config, pretrained=True)
     else:
         raise ValueError(f"Unknown backbone: {config.backbone}")

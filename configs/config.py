@@ -139,6 +139,9 @@ class TrainingConfig:
     # Separate learning rate for quantum parameters (often needs different scale)
     quantum_learning_rate: float = 1e-2
     
+    # Quantum Transfer Learning: Freeze backbone weights
+    freeze_backbone: bool = False
+    
     # Optimizer: 'adam', 'adamw', 'sgd'
     optimizer: str = "adam"
     
