@@ -60,6 +60,10 @@ def parse_args():
         help='Operation mode'
     )
     
+    # Project arguments
+    parser.add_argument('--project_name', type=str, default='hybrid_qml_medical_imaging',
+                        help='WandB/MLFlow project name')
+
     # Data arguments
     parser.add_argument('--data_dir', type=str, default='./data/brain_mri',
                         help='Path to dataset directory')
@@ -72,6 +76,8 @@ def parse_args():
     parser.add_argument('--model_type', type=str, default='hybrid',
                         choices=['hybrid', 'classical', 'ensemble'],
                         help='Type of model to use')
+    parser.add_argument('--backbone', type=str, default=None,
+                        help='CNN backbone (resnet18, efficientnet_b0, etc)')
     parser.add_argument('--num_features', type=int, default=10,
                         help='Number of CNN output features (max 10)')
     parser.add_argument('--num_classes', type=int, default=3,
@@ -96,6 +102,8 @@ def parse_args():
                         help='Learning rate')
     parser.add_argument('--quantum_lr', type=float, default=1e-2,
                         help='Quantum parameters learning rate')
+    parser.add_argument('--freeze_backbone', action='store_true',
+                        help='Freeze CNN backbone weights (Quantum Transfer Learning)')
     
     # Checkpoints
     parser.add_argument('--checkpoint', type=str, default=None,
@@ -103,7 +111,7 @@ def parse_args():
     parser.add_argument('--classical_checkpoint', type=str, default=None,
                         help='Path to classical checkpoint for finetune mode')
     parser.add_argument('--freeze_cnn', action='store_true',
-                        help='Freeze CNN backbone during fine-tuning')
+                        help='Freeze CNN backbone during fine-tuning (deprecated, use --freeze_backbone)')
     parser.add_argument('--output_dir', type=str, default='./outputs',
                         help='Output directory')
     
@@ -123,6 +131,7 @@ def parse_args():
 def build_config(args) -> Config:
     """Build configuration from arguments."""
     config = Config(
+        project_name=args.project_name,
         seed=args.seed,
         output_dir=args.output_dir,
     )
@@ -135,6 +144,7 @@ def build_config(args) -> Config:
     # Model config
     config.model.num_features = args.num_features
     config.model.num_classes = args.num_classes
+    config.model.backbone = args.backbone
     
     # Quantum config
     config.quantum.n_qubits = args.n_qubits
@@ -146,6 +156,7 @@ def build_config(args) -> Config:
     config.training.num_epochs = args.epochs
     config.training.learning_rate = args.lr
     config.training.quantum_learning_rate = args.quantum_lr
+    config.training.freeze_backbone = args.freeze_backbone or args.freeze_cnn
     
     return config
 
