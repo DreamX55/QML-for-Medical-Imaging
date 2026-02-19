@@ -130,7 +130,9 @@ class ParameterizedQuantumCircuit:
         Returns:
             PennyLane QNode representing the circuit
         """
-        @qml.qnode(self.dev, interface='torch', diff_method='backprop')
+        # lightning.qubit uses 'adjoint', default.qubit uses 'backprop'
+        diff_method = 'adjoint' if 'lightning' in self.config.device else 'backprop'
+        @qml.qnode(self.dev, interface='torch', diff_method=diff_method)
         def circuit(inputs, weights):
             """
             Quantum circuit with feature encoding and expressive variational layers.
