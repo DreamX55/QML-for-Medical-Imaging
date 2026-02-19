@@ -17,7 +17,7 @@ ehthumbs.db
 Thumbs.db
 
 # Project Specific
-data/
+data/brain_mri/
 outputs/
 outputs_classical/
 experiments/output/
