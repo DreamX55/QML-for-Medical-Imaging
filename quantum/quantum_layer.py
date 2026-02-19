@@ -121,18 +121,41 @@ class QuantumLayer(nn.Module):
             log_angle_statistics(x_normalized, label="rotation_angles")
             self._debug_counter += 1
         
-        # Process each sample through the quantum circuit
-        # Note: lightning.qubit with adjoint diff doesn't support parameter
-        # broadcasting (silently returns wrong shapes), so we use sequential
-        # execution which works reliably across all PennyLane backends.
-        outputs = []
-        for i in range(batch_size):
-            sample = x_normalized[i]
-            result = self.pqc(sample, weights_cpu)
-            if isinstance(result, list):
-                result = torch.stack(result)
-            outputs.append(result)
-        output = torch.stack(outputs, dim=0)
+        # Execute quantum circuit
+        # Strategy:
+        # 1. 'default.qubit' + backprop: Supports parameter broadcasting (vectorized, fast)
+        # 2. 'lightning.qubit' + adjoint: Fast per-shot but NO broadcasting (must loop)
+        # 3. Parameter shift: Hardware compatible, usually typically sequential
+        
+        use_batching = (
+            'lightning' not in self.config.device and 
+            not self.config.use_parameter_shift
+        )
+        
+        if use_batching:
+            try:
+                # Vectorized batch processing
+                result = self.pqc(x_normalized, weights_cpu)
+                if isinstance(result, (list, tuple)):
+                    output = torch.stack(result, dim=-1)
+                    if output.dim() == 1:
+                        output = output.unsqueeze(0)
+                else:
+                    output = result
+            except Exception:
+                # Fallback to sequential if broadcasting fails unpredictably
+                use_batching = False
+        
+        if not use_batching:
+            # Sequential processing (required for lightning.qubit)
+            outputs = []
+            for i in range(batch_size):
+                sample = x_normalized[i]
+                result = self.pqc(sample, weights_cpu)
+                if isinstance(result, list):
+                    result = torch.stack(result)
+                outputs.append(result)
+            output = torch.stack(outputs, dim=0)
         
         # Convert to float32 and move back to original device
         # (MPS doesn't support float64, PennyLane may return float64)

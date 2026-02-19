@@ -141,6 +141,7 @@ class CNNFeatureExtractor(nn.Module):
             nn.ReLU(inplace=True),
             nn.Dropout(dropout_rate),
             nn.Linear(64, self.output_dim),
+            nn.BatchNorm1d(self.output_dim),  # Normalize to N(0,1) to avoid sigmoid saturation
         )
         
         # Initialize weights
@@ -261,6 +262,7 @@ class ResNetFeatureExtractor(nn.Module):
             nn.ReLU(inplace=True),
             nn.Dropout(config.dropout_rate),
             nn.Linear(64, self.output_dim),
+            nn.BatchNorm1d(self.output_dim),  # Normalize to N(0,1)
         )
         
         # Freeze early layers if using pretrained
