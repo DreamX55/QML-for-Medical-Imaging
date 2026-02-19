@@ -158,6 +158,17 @@ class HybridQuantumClassifier(nn.Module):
         # We start with equal weighting. A learned weighting scalar could be added later.
         # current state-of-the-art often uses simple averaging.
         alpha = 0.5
+        
+        # DEBUG: Check shapes before combination
+        if c_logits.shape != q_logits.shape:
+             print(f"SHAPE MISMATCH DETECTED:")
+             print(f"  c_logits: {c_logits.shape}")
+             print(f"  q_logits: {q_logits.shape}")
+             # Attempt to fix if trivial transpose
+             if c_logits.shape == (q_logits.shape[1], q_logits.shape[0]):
+                 q_logits = q_logits.T
+                 print(f"  -> Transposed q_logits to: {q_logits.shape}")
+
         ensemble_logits = alpha * c_logits + (1 - alpha) * q_logits
         
         return ensemble_logits

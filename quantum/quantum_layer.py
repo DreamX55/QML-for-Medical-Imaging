@@ -135,15 +135,35 @@ class QuantumLayer(nn.Module):
         if use_batching:
             try:
                 # Vectorized batch processing
+                # Result shape depends on how PennyLane returns the data
+                # Typically: [n_outputs, batch_size] or [batch_size, n_outputs]
                 result = self.pqc(x_normalized, weights_cpu)
+                
+                # Turn result into a single tensor
                 if isinstance(result, (list, tuple)):
-                    output = torch.stack(result, dim=-1)
-                    if output.dim() == 1:
-                        output = output.unsqueeze(0)
+                    # If list of tensors (one per measurement), stack them
+                    # Each element in list is likely [batch_size]
+                    output = torch.stack(result, dim=-1) # -> [batch_size, n_outputs]
                 else:
                     output = result
-            except Exception:
+                
+                # Check shape dimensions
+                # We expect [batch_size, n_outputs]
+                if output.shape == (self.n_outputs, batch_size):
+                    output = output.T
+                elif output.shape == (batch_size, self.n_outputs):
+                    pass # Correct shape
+                elif output.dim() == 1 and batch_size == 1:
+                     output = output.unsqueeze(0) # [n_outputs] -> [1, n_outputs]
+                
+                # Verify final shape
+                if output.shape[0] != batch_size:
+                     # Fallback if shape is still wrong
+                     use_batching = False
+
+            except Exception as e:
                 # Fallback to sequential if broadcasting fails unpredictably
+                print(f"Batching failed: {e}")
                 use_batching = False
         
         if not use_batching:
@@ -152,14 +172,24 @@ class QuantumLayer(nn.Module):
             for i in range(batch_size):
                 sample = x_normalized[i]
                 result = self.pqc(sample, weights_cpu)
-                if isinstance(result, list):
+                # Ensure result is a tensor
+                if isinstance(result, (list, tuple)):
                     result = torch.stack(result)
+                elif isinstance(result, np.ndarray):
+                    result = torch.from_numpy(result)
+                
                 outputs.append(result)
             output = torch.stack(outputs, dim=0)
         
         # Convert to float32 and move back to original device
         # (MPS doesn't support float64, PennyLane may return float64)
         output = output.float().to(original_device)
+        
+        # Final shape check to prevent downstream errors
+        if output.shape[0] != batch_size:
+             # Try to transpose if dimensions are swapped
+             if output.shape[1] == batch_size and output.shape[0] == self.n_outputs:
+                 output = output.T
         
         return output
     
