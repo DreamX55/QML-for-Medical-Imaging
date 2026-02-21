@@ -257,9 +257,9 @@ def run_epoch(
             preds = torch.argmax(logits, dim=1)
 
             total_loss += loss.item()
-            all_labels.extend(labels.cpu().numpy())
-            all_preds.extend(preds.cpu().numpy())
-            all_probs.extend(probs.cpu().numpy())
+            all_labels.extend(labels.detach().cpu().numpy())
+            all_preds.extend(preds.detach().cpu().numpy())
+            all_probs.extend(probs.detach().cpu().numpy())
 
     avg_loss = total_loss / len(loader)
     accuracy = accuracy_score(all_labels, all_preds)
