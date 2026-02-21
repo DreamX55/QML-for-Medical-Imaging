@@ -1,33 +1,64 @@
-# Hybrid Quantum-Classical Machine Learning for Medical Imaging
+# Hybrid Quantum-Classical MRI Classifier
 
-A research-grade implementation of hybrid quantum-classical deep learning for brain cancer MRI classification with explainable AI (XAI).
+## Project Overview
+This repository implements a Hybrid Quantum-Classical MRI classifier using:
+- ResNet18 transfer learning
+- Frozen backbone (quantum transfer learning)
+- 10-qubit PQC
+- Classical-Quantum ensemble
+- Explainable AI (GradCAM + SHAP + LIME)
 
-## Overview
+## Current Production Architecture
+The hybrid pipeline operates as follows:
 
-This project implements a complete pipeline combining:
-- **CNN Feature Extraction**: Custom lightweight CNN compressing images to ≤10 features
-- **Quantum Processing**: 10-qubit PQC with RY+RZ encoding, ring entanglement, and final rotation layer
-- **Classical Baseline**: XGBoost classification for comparison
-- **Explainable AI**: Grad-CAM, SHAP, and LIME for interpretability
-
-## Architecture
-
+```text
+MRI → ResNet18 (frozen) → 512 features
+  ├──→ Branch A: Classical linear classifier
+  └──→ Branch B: Dense → BatchNorm → 10 features → Quantum circuit → classifier
+       └──→ Ensemble (0.5 classical + 0.5 quantum)
 ```
-MRI Image → CNN (Conv→Pool→GAP→Dense) → 10 features → Quantum Layer → Classifier → Prediction
-                                              ↓
-                                         XGBoost (baseline)
-```
 
-### Quantum Circuit
-- **Encoding**: RY angle encoding (features normalized to [0, π] via sigmoid scaling)
-- **Variational**: 2 layers of trainable RY + RZ rotations (full Bloch sphere coverage)
-- **Entanglement**: Ring CNOT pattern (symmetric connectivity)
-- **Final Rotation**: Trainable RY + RZ before measurement (optimal measurement basis)
-- **Measurement**: Pauli-Z expectations on all qubits
-- **Parameters**: 60 trainable (vs 20 with old RY-only design)
+**Current Performance:** ~92–93% accuracy, ~0.98 AUC.
+
+## Why Quantum Is Used
+The quantum layer models complex nonlinear interactions in latent feature space and acts as an ensemble booster rather than a replacement for classical ML.
+
+## High-Performance Training on Colab
+- **Main training notebook:** `notebooks/colab_high_performance.ipynb`
+- **Target environment:** Designed for GPU runtime
+
+**Recommended environment steps:**
+1. Install requirements
+2. Upload dataset
+3. Run notebook top-to-bottom
+
+## Classical Baseline & XAI Comparison
+This repository includes:
+- Strong classical baseline model
+- Hybrid vs Classical comparison experiments
+- Explainability comparison across models
+
+## Repository Structure
+```text
+.
+├── configs/                 # Configuration and hyperparameter settings
+├── data/                    # Data loading and preprocessing
+├── evaluation/              # Evaluation and analysis
+├── experiments/             # Architecture experiments (Feature Bottleneck)
+├── models/                  # CNN feature extractors and hybrid architectures
+├── notebooks/               # Interactive training and evaluation notebooks
+│   └── colab_high_performance.ipynb
+├── quantum/                 # Quantum layer implementations and circuits
+├── training/                # Training loop, losses, and metrics
+├── xai/                     # Explainable AI (GradCAM, SHAP, LIME)
+├── main.py                  # CLI entry point for local execution
+├── inference.py             # Inference script
+├── architecture_docs.md     # In-depth design and theory documentation
+├── requirements.txt         # Project dependencies
+└── README.md                # This document
+```
 
 ## Installation
-
 ```bash
 cd qml_medical_imaging
 pip install -r requirements.txt
@@ -79,157 +110,21 @@ qml_medical_imaging/
 
 ## Usage
 
-### 1. Train Hybrid Model (CNN + Quantum)
-
+**1. Train Hybrid Model:**
 ```bash
-python main.py --mode train \
-    --model_type hybrid \
-    --data_dir ./data/brain_tumor_dataset \
-    --epochs 50 \
-    --lr 1e-3 \
-    --quantum_lr 1e-2 \
-    --n_qubits 10 \
-    --n_layers 2 \
-    --entanglement ring \
-    --batch_size 16 \
-    --output_dir ./outputs
+python main.py --mode train --model_type hybrid --data_dir ./data/brain_tumor_dataset --n_qubits 10 --n_layers 2 --entanglement ring
 ```
 
-### 2. Train Classical-Only Baseline
-
+**2. Train Classical Baseline:**
 ```bash
-python main.py --mode train \
-    --model_type classical \
-    --data_dir ./data/brain_tumor_dataset \
-    --epochs 50 \
-    --lr 1e-3 \
-    --batch_size 16 \
-    --output_dir ./outputs_classical
+python main.py --mode train --model_type classical --data_dir ./data/brain_tumor_dataset
 ```
 
-### 3. Evaluate a Trained Model
-
+**3. Evaluate and Generate XAI Explanations:**
 ```bash
-python main.py --mode evaluate \
-    --model_type hybrid \
-    --checkpoint ./checkpoints/best_model.pt \
-    --data_dir ./data/brain_tumor_dataset \
-    --n_qubits 10 \
-    --n_layers 2 \
-    --entanglement ring \
-    --output_dir ./outputs
-```
-
-> **Important:** `--n_qubits`, `--n_layers`, and `--entanglement` must match training config, otherwise checkpoint loading will fail with an architecture mismatch error.
-
-### 4. Generate XAI Explanations
-
-```bash
-python main.py --mode explain \
-    --checkpoint ./checkpoints/best_model.pt \
-    --image ./sample_image.jpg
-```
-
-### 5. Run Ablation Study (Hybrid vs Classical)
-
-```bash
-python main.py --mode ablation \
-    --data_dir ./data/brain_tumor_dataset \
-    --n_qubits 10 \
-    --n_layers 2 \
-    --entanglement ring \
-    --output_dir ./outputs/ablation
-```
-
-### 6. Feature Bottleneck Experiment
-
-```bash
-python experiments/feature_bottleneck.py \
-    --data_dir ./data/brain_tumor_dataset \
-    --dimensions 10 32 64 \
-    --epochs 30 \
-    --batch_size 16 \
-    --output_dir ./outputs/feature_bottleneck
-```
-
-### 7. Inference
-
-```bash
-# Single image
-python inference.py --checkpoint ./checkpoints/best_model.pt \
-    --image /path/to/image.jpg --explain
-
-# Batch inference
-python inference.py --checkpoint ./checkpoints/best_model.pt \
-    --image_dir ./test_images --explain
-```
-
-## Configuration
-
-All hyperparameters are managed via `configs/config.py`:
-
-```python
-from configs.config import Config
-
-config = Config()
-config.data.batch_size = 32
-config.quantum.n_layers = 3
-config.training.learning_rate = 1e-3
-```
-
-### Key Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `model.num_features` | 10 | CNN output dimension (max 10 for quantum) |
-| `quantum.n_qubits` | 10 | Number of qubits |
-| `quantum.n_layers` | 2 | PQC variational layers |
-| `quantum.entanglement` | 'ring' | CNOT pattern ('linear', 'ring', 'full') |
-| `training.num_epochs` | 50 | Training epochs |
-| `training.learning_rate` | 1e-3 | Classical learning rate |
-| `training.quantum_learning_rate` | 1e-2 | Quantum parameters LR |
-
-## Dataset
-
-Expects data organized as:
-```
-data/brain_mri/
-├── glioma/
-├── meningioma/
-├── pituitary/
-└── no_tumor/
-```
-
-## Explainable AI
-
-### Grad-CAM
-Visualizes CNN attention regions highlighting important areas for classification.
-
-### SHAP
-Feature-level importance analysis for both CNN and quantum features.
-
-### LIME
-Local interpretable explanations showing which image regions contribute to predictions.
-
-## Research Notes
-
-1. **Expressive PQC**: RY+RZ rotations access full Bloch sphere (vs RY-only = real amplitudes)
-2. **Ring Entanglement**: Symmetric qubit connectivity, breaks boundary effects of linear chains
-3. **Final Rotation Layer**: Aligns measurement basis with learned representation
-4. **Sigmoid Normalization**: Deterministic feature→angle mapping, consistent across train/inference
-5. **Separate Learning Rates**: Quantum params use 10× higher LR (1e-2 vs 1e-3)
-6. **Feature Compression**: ≤10 features enables direct qubit mapping
-7. **Dynamic pin_memory**: Auto-disabled on MPS (Apple Silicon) to avoid PyTorch warnings
-
-## Citation
-
-```bibtex
-@article{hybrid_qml_medical,
-  title={Hybrid Quantum-Classical Machine Learning for Medical Imaging},
-  year={2024}
-}
+python main.py --mode evaluate --model_type hybrid --checkpoint ./checkpoints/best_model.pt --data_dir ./data/brain_tumor_dataset
+python main.py --mode explain --checkpoint ./checkpoints/best_model.pt --image ./sample_image.jpg
 ```
 
 ## License
-
 MIT License
